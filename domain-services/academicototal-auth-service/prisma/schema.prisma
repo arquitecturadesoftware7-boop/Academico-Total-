@@ -1,0 +1,31 @@
+// prisma/schema.prisma
+
+// [DOCUMENTACION] Define PostgreSQL como el proveedor de la base de datos, 
+// usando la URL de conexión del archivo .env
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// [DOCUMENTACION] Modelo de Usuario: Contiene los campos esenciales para Autenticación.
+// El campo 'role' es clave para la lógica de autorización del Data Aggregator.
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique // El email es único y se usa como identificador de login
+  password  String   // Almacena el hash de la contraseña (bcrypt)
+  name      String
+  role      Role     @default(STUDENT) // Rol por defecto
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// [DOCUMENTACION] Enum para los roles académicos.
+enum Role {
+  ADMINISTRATIVE
+  TEACHER
+  STUDENT
+}
