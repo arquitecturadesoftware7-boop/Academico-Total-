@@ -4,40 +4,59 @@ const prisma = require('../database/prisma-client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-// [DOCUMENTACION] Se accede a la clave secreta desde las variables de entorno (.env).
-// Esta clave es vital para firmar y verificar la autenticidad del JWT.
+// [DOCUMENTACION] Constantes de seguridad y configuracion
 const JWT_SECRET = process.env.JWT_SECRET;
-const SALT_ROUNDS = 10; // Factor de complejidad recomendado para bcrypt
+const ACCESS_TOKEN_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '15m'; // 15 minutos (para proteccion)
+const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '7d'; // 7 dias (para conveniencia)
+const SALT_ROUNDS = 10;
 
 class AuthService {
+
+    // ----------------------------------------------------
+    // [UTILIDAD SEGURIDAD] Genera el par de tokens (Access y Refresh)
+    // ----------------------------------------------------
+    generateTokens(user) {
+        // Los claims (id, role, email) son los datos de AUTORIZACIÓN que lleva el token.
+        const claims = { id: user.id, role: user.role, email: user.email };
+
+        // 1. Access Token (Corto): Usado para acceder a los recursos del Aggregator.
+        const accessToken = jwt.sign(
+            claims, 
+            JWT_SECRET, 
+            { expiresIn: ACCESS_TOKEN_EXPIRY }
+        );
+
+        // 2. Refresh Token (Largo): Usado solo para solicitar un nuevo Access Token.
+        const refreshToken = jwt.sign(
+            claims, 
+            JWT_SECRET, // Se usa la misma clave secreta, pero con expiracion mas larga
+            { expiresIn: REFRESH_TOKEN_EXPIRY }
+        );
+
+        return { accessToken, refreshToken };
+    }
+
+    // ----------------------------------------------------
+    // [SEGURIDAD] Valida la integridad y expiracion de cualquier token
+    // ----------------------------------------------------
+    verifyTokenIntegrity(token) {
+        // jwt.verify() lanza un error si el token esta expirado (TokenExpiredError) o la firma es invalida (JsonWebTokenError).
+        return jwt.verify(token, JWT_SECRET);
+    }
     
     // ----------------------------------------------------
     // Servicio: Registro de un nuevo usuario
     // ----------------------------------------------------
     async registerUser(name, email, password, role = 'STUDENT') {
-        // 1. [SEGURIDAD] Hashing de la contraseña. Nunca se almacena en texto plano.
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-        // 2. Creación del usuario en la DB a través de Prisma.
         try {
             const user = await prisma.user.create({
-                data: {
-                    name,
-                    email,
-                    password: hashedPassword,
-                    role
-                },
-                // [SEGURIDAD] Solo se devuelve información no sensible. El hash de la contraseña se omite.
-                select: {
-                    id: true,
-                    email: true,
-                    name: true,
-                    role: true,
-                }
+                data: { name, email, password: hashedPassword, role },
+                select: { id: true, email: true, name: true, role: true }
             });
             return user;
         } catch (error) {
-            // Manejo de error si el email ya existe (código de error de unicidad de Prisma)
             if (error.code === 'P2002') {
                 throw new Error('El correo electrónico ya está registrado.');
             }
@@ -46,45 +65,46 @@ class AuthService {
     }
 
     // ----------------------------------------------------
-    // Servicio: Login y Generación del JWT
-    // Este método genera el token que el Data Aggregator usará para la autorización.
+    // Servicio: Login y Generación del PAR de JWTs
     // ----------------------------------------------------
     async login(email, password) {
-        // 1. Buscar usuario en la base de datos por email
         const user = await prisma.user.findUnique({ where: { email } });
         
         if (!user) {
-            // [SEGURIDAD] Error genérico para no revelar si el email es incorrecto
             throw new Error('Credenciales inválidas'); 
         }
 
-        // 2. [SEGURIDAD] Comparar la contraseña ingresada con el hash almacenado
         const isPasswordValid = await bcrypt.compare(password, user.password);
 
         if (!isPasswordValid) {
             throw new Error('Credenciales inválidas');
         }
 
-        // 3. Generar el JWT
-        // [CLAVE SOA/DATA AGGREGATOR] El token contiene 'claims' (id, role, email). 
-        // Estos claims son la base de la Autorización, permitiendo al Aggregator tomar decisiones
-        // de acceso sin volver a consultar este servicio.
-        const token = jwt.sign(
-            { id: user.id, role: user.role, email: user.email }, 
-            JWT_SECRET, 
-            { expiresIn: '1h' } // Duración del token
-        );
+        // [CLAVE SEGURIDAD] Generamos el par de tokens
+        const { accessToken, refreshToken } = this.generateTokens(user);
 
-        // Devolvemos el token y los datos clave del usuario.
         return {
-            token,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role
-            }
+            accessToken,
+            refreshToken,
+            user: { id: user.id, name: user.name, email: user.email, role: user.role }
         };
+    }
+
+    // ----------------------------------------------------
+    // Servicio: Renovar el Access Token usando el Refresh Token
+    // ----------------------------------------------------
+    async refreshAccessToken(refreshToken) {
+        // 1. Verificar la integridad y validez del Refresh Token
+        // Si el token es invalido o expira, verifyTokenIntegrity lanza un error.
+        const decoded = this.verifyTokenIntegrity(refreshToken); 
+
+        // 2. Obtener los claims (datos de autorizacion) del token validado
+        const claims = { id: decoded.id, role: decoded.role, email: decoded.email };
+
+        // 3. Generar un nuevo Access Token (solo el access token)
+        const newAccessToken = jwt.sign(claims, JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRY });
+
+        return newAccessToken;
     }
 }
 
