@@ -11,5 +11,6 @@ router.post('/register', AuthController.register);
 // [DOCUMENTACION] POST /login: EL endpoint clave. Lo consume el Data Aggregator 
 // para iniciar la orquestacion de una sesion de usuario.
 router.post('/login', AuthController.login);
+router.post('/token/refresh', AuthController.refreshToken); 
 
 module.exports = router;
