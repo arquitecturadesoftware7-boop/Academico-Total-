@@ -1,16 +1,17 @@
-// src/routes/authRoutes.js
+// src/routes/authRoutes.js (FINALIZADO)
 
 const express = require('express');
 const AuthController = require('../controllers/AuthController');
 
 const router = express.Router();
 
-// [DOCUMENTACION] POST /register: Usado para crear cuentas iniciales.
-router.post('/register', AuthController.register);
+// [ELIMINADO] La ruta /register ya no existe
 
-// [DOCUMENTACION] POST /login: EL endpoint clave. Lo consume el Data Aggregator 
-// para iniciar la orquestacion de una sesion de usuario.
 router.post('/login', AuthController.login);
+
 router.post('/token/refresh', AuthController.refreshToken); 
+
+// [NUEVA RUTA] Usada por el Data Aggregator para verificar tokens
+router.post('/token/verify', AuthController.verifyToken); 
 
 module.exports = router;

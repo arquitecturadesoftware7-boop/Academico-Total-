@@ -1,0 +1,39 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 2. Modelos de Dominio (Student Service - Ahora el dueño de la Identidad)
+
+// Esquema actualizado en student_profiles
+model StudentProfile {
+  id            String   @id @map("student_id") 
+  enrollmentId  String   @unique 
+  entryYear     Int
+  major         String
+  
+  // CAMPOS DE IDENTIDAD Y SEGURIDAD (transferidos del Auth Service)
+  email         String   @unique 
+  password      String   // El hash de la contraseña
+  role          String   @default("STUDENT") 
+  
+  status        StudentStatus @default(ACTIVE)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@map("student_profiles")
+}
+// ... (rest of the schema)
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  LEAVE
+}
+

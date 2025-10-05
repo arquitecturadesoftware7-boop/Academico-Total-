@@ -1,51 +1,38 @@
-// src/controllers/AuthController.js
+// src/controllers/AuthController.js (ACTUALIZADO)
 
 const AuthService = require('../services/AuthService');
 
 class AuthController {
     
     // ----------------------------------------------------
-    // Controlador para registrar un nuevo usuario (POST /register)
-    // ----------------------------------------------------
-    async register(req, res) {
-        try {
-            const { name, email, password, role } = req.body;
-            
-            const newUser = await AuthService.registerUser(name, email, password, role);
-            
-            res.status(201).json({
-                message: 'Usuario registrado exitosamente.',
-                user: newUser
-            });
-        } catch (error) {
-            if (error.message.includes('ya está registrado')) {
-                return res.status(409).json({ message: error.message });
-            }
-            console.error('Error en registro:', error);
-            res.status(500).json({ message: 'Error interno al registrar el usuario.' });
-        }
-    }
-
-    // ----------------------------------------------------
-    // Controlador para iniciar sesión (POST /login)
-    // Devuelve el par de tokens (Access y Refresh)
+    // Controlador: Login (Consumo de Datos por Aggregator)
     // ----------------------------------------------------
     async login(req, res) {
-        try {
-            const { email, password } = req.body;
+        // El Aggregator envía los tres datos necesarios.
+        const { plainPassword, storedPasswordHash, userDetails } = req.body; 
 
-            // [CLAVE SEGURIDAD] Llama al servicio para obtener el par de tokens.
-            const { accessToken, refreshToken, user } = await AuthService.login(email, password);
+        // Validación de datos mínimos requeridos
+        if (!plainPassword || !storedPasswordHash || !userDetails || !userDetails.id || !userDetails.role) {
+            return res.status(400).json({ message: 'Datos incompletos para la verificación de credenciales.' });
+        }
+
+        try {
+            // Llama al servicio para verificar y emitir tokens.
+            const { accessToken, refreshToken, user } = await AuthService.login(
+                plainPassword, 
+                storedPasswordHash, 
+                userDetails
+            );
 
             res.status(200).json({
-                message: 'Inicio de sesión exitoso.',
+                message: 'Inicio de sesión exitoso. Tokens emitidos por Token Mint.',
                 accessToken,
-                refreshToken, // Token de larga duración para renovar la sesión
+                refreshToken, 
                 user
             });
         } catch (error) {
-            if (error.message === 'Credenciales inválidas') {
-                return res.status(401).json({ message: error.message });
+            if (error.message.includes('Credenciales inválidas')) {
+                return res.status(401).json({ message: 'Credenciales inválidas' });
             }
             console.error('Error en login:', error);
             res.status(500).json({ message: 'Error interno del servidor.' });
@@ -53,10 +40,31 @@ class AuthController {
     }
 
     // ----------------------------------------------------
-    // [NUEVA LÓGICA] Controlador para renovar el Access Token (POST /token/refresh)
+    // Controlador: Verificación de Token (NUEVO ENDPOINT)
+    // Usado por el Aggregator para validar tokens.
     // ----------------------------------------------------
-    async refreshToken(req, res) {
-        // [DOCUMENTACION] El Aggregator envía el Refresh Token en el cuerpo de la solicitud.
+    async verifyToken(req, res) {
+        const { token } = req.body;
+        if (!token) {
+            return res.status(400).json({ message: 'Token es requerido para la verificación.' });
+        }
+        
+        try {
+            const decoded = AuthService.verifyTokenIntegrity(token);
+            
+            // Devuelve los claims decodificados (id, role, email)
+            res.status(200).json({
+                message: 'Token verificado exitosamente.',
+                decoded
+            });
+        } catch (error) {
+            // 401 si hay error de expiración o firma inválida.
+            res.status(401).json({ message: error.message });
+        }
+    }
+
+    // [SIN CAMBIOS] Controlador para refrescar el Access Token
+    async refreshToken(req, res) { // <-- DEBE SER ASYNC
         const { refreshToken } = req.body;
 
         if (!refreshToken) {
@@ -64,22 +72,24 @@ class AuthController {
         }
 
         try {
-            // [CLAVE SEGURIDAD] Llama al servicio para verificar la integridad del Refresh Token
-            // y emitir un nuevo Access Token.
-            const newAccessToken = await AuthService.refreshAccessToken(refreshToken);
-
-            res.status(200).json({
-                message: 'Access Token renovado exitosamente.',
+            // [CLAVE] DEBE USAR AWAIT para esperar la verificación del servicio
+            const newAccessToken = await AuthService.refreshAccessToken(refreshToken); 
+            
+            return res.status(200).json({
+                message: "Access Token renovado exitosamente.",
                 accessToken: newAccessToken
             });
 
         } catch (error) {
-            // [SEGURIDAD] Errores comunes: Token expirado, inválido o manipulado.
-            if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
-                return res.status(401).json({ message: 'Refresh token inválido o expirado. Vuelva a iniciar sesión.' });
-            }
-            console.error('Error al renovar token:', error);
-            res.status(500).json({ message: 'Error interno al renovar el token.' });
+            // Si el error es un JWT (expiración o firma inválida), devolvemos 401.
+            const status = (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') ? 401 : 500;
+            
+            // Registramos el error interno para debugging
+            console.error('Error al renovar token en Auth Service:', error.message);
+            
+            return res.status(status).json({ 
+                message: error.message 
+            });
         }
     }
 }
