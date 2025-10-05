@@ -1,23 +1,15 @@
-// src/controllers/AuthController.js (ACTUALIZADO)
-
 const AuthService = require('../services/AuthService');
 
 class AuthController {
     
-    // ----------------------------------------------------
-    // Controlador: Login (Consumo de Datos por Aggregator)
-    // ----------------------------------------------------
     async login(req, res) {
-        // El Aggregator envía los tres datos necesarios.
         const { plainPassword, storedPasswordHash, userDetails } = req.body; 
 
-        // Validación de datos mínimos requeridos
         if (!plainPassword || !storedPasswordHash || !userDetails || !userDetails.id || !userDetails.role) {
             return res.status(400).json({ message: 'Datos incompletos para la verificación de credenciales.' });
         }
 
         try {
-            // Llama al servicio para verificar y emitir tokens.
             const { accessToken, refreshToken, user } = await AuthService.login(
                 plainPassword, 
                 storedPasswordHash, 
@@ -39,10 +31,6 @@ class AuthController {
         }
     }
 
-    // ----------------------------------------------------
-    // Controlador: Verificación de Token (NUEVO ENDPOINT)
-    // Usado por el Aggregator para validar tokens.
-    // ----------------------------------------------------
     async verifyToken(req, res) {
         const { token } = req.body;
         if (!token) {
@@ -52,19 +40,16 @@ class AuthController {
         try {
             const decoded = AuthService.verifyTokenIntegrity(token);
             
-            // Devuelve los claims decodificados (id, role, email)
             res.status(200).json({
                 message: 'Token verificado exitosamente.',
                 decoded
             });
         } catch (error) {
-            // 401 si hay error de expiración o firma inválida.
             res.status(401).json({ message: error.message });
         }
     }
 
-    // [SIN CAMBIOS] Controlador para refrescar el Access Token
-    async refreshToken(req, res) { // <-- DEBE SER ASYNC
+    async refreshToken(req, res) {
         const { refreshToken } = req.body;
 
         if (!refreshToken) {
@@ -72,7 +57,6 @@ class AuthController {
         }
 
         try {
-            // [CLAVE] DEBE USAR AWAIT para esperar la verificación del servicio
             const newAccessToken = await AuthService.refreshAccessToken(refreshToken); 
             
             return res.status(200).json({
@@ -81,10 +65,8 @@ class AuthController {
             });
 
         } catch (error) {
-            // Si el error es un JWT (expiración o firma inválida), devolvemos 401.
             const status = (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') ? 401 : 500;
             
-            // Registramos el error interno para debugging
             console.error('Error al renovar token en Auth Service:', error.message);
             
             return res.status(status).json({ 
